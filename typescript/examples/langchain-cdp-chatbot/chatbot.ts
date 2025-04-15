@@ -10,7 +10,6 @@ import {
   pythActionProvider,
   openseaActionProvider,
   alloraActionProvider,
-  truemarketsActionProvider,
 } from "@coinbase/agentkit";
 import { getLangChainTools } from "@coinbase/agentkit-langchain";
 import { HumanMessage } from "@langchain/core/messages";
@@ -123,9 +122,6 @@ async function initializeAgent() {
             ]
           : []),
         alloraActionProvider(),
-        truemarketsActionProvider({
-          RPC_URL: process.env.RPC_URL,
-        }),
       ],
     });
 

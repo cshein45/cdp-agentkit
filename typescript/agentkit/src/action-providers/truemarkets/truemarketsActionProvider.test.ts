@@ -1,7 +1,7 @@
 import { truemarketsActionProvider, TrueMarketsActionProvider } from "./truemarketsActionProvider";
 import { EvmWalletProvider } from "../../wallet-providers";
 import { Network } from "../../network";
-import { TruthMarketABI, USDC_ADDRESS } from "./constants";
+import { USDC_ADDRESS } from "./constants";
 import { Hex, createPublicClient } from "viem";
 
 // Mock viem's createPublicClient
@@ -11,6 +11,13 @@ jest.mock("viem", () => {
     ...originalModule,
     createPublicClient: jest.fn().mockImplementation(() => ({
       // Mock public client methods as needed
+      multicall: jest.fn().mockImplementation(({ contracts }) => {
+        // Create mock responses with success status
+        return contracts.map(() => ({
+          status: "success",
+          result: "mock result",
+        }));
+      }),
     })),
     http: jest.fn().mockImplementation(url => ({ url })),
   };
@@ -76,13 +83,23 @@ describe("TrueMarketsActionProvider", () => {
       // Create a spy on the actual implementation
       const getActiveMarketsSpy = jest.spyOn(provider, "getActiveMarkets");
 
-      // Replace the original implementation with our mocked version
+      // Replace the original implementation with our mocked version to return JSON
       getActiveMarketsSpy.mockImplementation(async () => {
-        return (
-          `Found 2 active markets (out of 2 total):\n\n` +
-          `Market #1 (${MOCK_MARKET_ADDRESS}): ${MOCK_MARKET_QUESTION}\n` +
-          `Market #0 (0x6789012345678901234567890123456789012345): Will this other test pass?\n`
-        );
+        return {
+          totalMarkets: 2,
+          markets: [
+            {
+              id: 1,
+              address: MOCK_MARKET_ADDRESS,
+              marketQuestion: MOCK_MARKET_QUESTION,
+            },
+            {
+              id: 0,
+              address: "0x6789012345678901234567890123456789012345" as Hex,
+              marketQuestion: "Will this other test pass?",
+            },
+          ],
+        };
       });
 
       const args = {
@@ -93,10 +110,11 @@ describe("TrueMarketsActionProvider", () => {
 
       const response = await provider.getActiveMarkets(mockWallet, args);
 
-      // Verify response contains expected data
-      expect(response).toContain("Found 2 active markets");
-      expect(response).toContain(MOCK_MARKET_QUESTION);
-      expect(response).toContain(MOCK_MARKET_ADDRESS);
+      // Verify response contains expected data in JSON format
+      expect(response.totalMarkets).toBe(2);
+      expect(response.markets.length).toBe(2);
+      expect(response.markets[0].marketQuestion).toBe(MOCK_MARKET_QUESTION);
+      expect(response.markets[0].address).toBe(MOCK_MARKET_ADDRESS);
 
       // Restore the original implementation
       getActiveMarketsSpy.mockRestore();
@@ -113,7 +131,8 @@ describe("TrueMarketsActionProvider", () => {
 
       const response = await provider.getActiveMarkets(mockWallet, args);
 
-      expect(response).toContain("No active markets found");
+      expect(response.totalMarkets).toBe(0);
+      expect(response.markets.length).toBe(0);
     });
 
     it("should handle errors", async () => {
@@ -128,55 +147,48 @@ describe("TrueMarketsActionProvider", () => {
 
       const response = await provider.getActiveMarkets(mockWallet, args);
 
-      expect(response).toContain(
+      expect(response.error).toBe(
         "Error retrieving active markets: Error: Failed to fetch active markets",
       );
+      expect(response.totalMarkets).toBe(0);
+      expect(response.markets.length).toBe(0);
     });
   });
 
   describe("getMarketDetails", () => {
+    let mockPublicClient: { multicall: jest.Mock };
+
     beforeEach(() => {
-      // Set up mock responses for all the contract calls in getMarketDetails
-      mockWallet.readContract
-        // Basic market info
-        .mockResolvedValueOnce(MOCK_MARKET_QUESTION) // marketQuestion
-        .mockResolvedValueOnce(MOCK_ADDITIONAL_INFO) // additionalInfo
-        .mockResolvedValueOnce(MOCK_MARKET_SOURCE) // marketSource
-        .mockResolvedValueOnce(MOCK_STATUS_NUM) // getCurrentStatus
-        .mockResolvedValueOnce(MOCK_END_OF_TRADING) // endOfTrading
-        .mockResolvedValueOnce([MOCK_YES_POOL_ADDRESS, MOCK_NO_POOL_ADDRESS]) // getPoolAddresses
+      // Access the mocked public client
+      mockPublicClient = (createPublicClient as jest.Mock).mock.results[0].value;
 
-        // Pool token information
-        .mockResolvedValueOnce(USDC_ADDRESS) // YES pool token0
-        .mockResolvedValueOnce(MOCK_YES_TOKEN_ADDRESS) // YES pool token1
-        .mockResolvedValueOnce(MOCK_NO_TOKEN_ADDRESS) // NO pool token0
-        .mockResolvedValueOnce(USDC_ADDRESS) // NO pool token1
-
-        // Pool balances
-        .mockResolvedValueOnce(1000000n) // YES pool USDC balance
-        .mockResolvedValueOnce(500000000000000000000n) // YES pool token balance
-        .mockResolvedValueOnce(2000000n) // NO pool USDC balance
-        .mockResolvedValueOnce(1000000000000000000000n) // NO pool token balance
-
-        // Liquidity and price data
+      // Setup multicall mock responses
+      mockPublicClient.multicall
+        // Basic info calls
         .mockResolvedValueOnce([
-          79228162514264337593543950336n, // sqrtPriceX96
-          0,
-          0,
-          0,
-          0,
-          0,
-          true, // other slot0 data
-        ]) // YES slot0
+          { status: "success", result: MOCK_MARKET_QUESTION },
+          { status: "success", result: MOCK_ADDITIONAL_INFO },
+          { status: "success", result: MOCK_MARKET_SOURCE },
+          { status: "success", result: MOCK_STATUS_NUM },
+          { status: "success", result: MOCK_END_OF_TRADING },
+          { status: "success", result: [MOCK_YES_POOL_ADDRESS, MOCK_NO_POOL_ADDRESS] },
+        ])
+        // Pool info calls
         .mockResolvedValueOnce([
-          79228162514264337593543950336n, // sqrtPriceX96
-          0,
-          0,
-          0,
-          0,
-          0,
-          true, // other slot0 data
-        ]); // NO slot0
+          { status: "success", result: USDC_ADDRESS },
+          { status: "success", result: MOCK_YES_TOKEN_ADDRESS },
+          { status: "success", result: MOCK_NO_TOKEN_ADDRESS },
+          { status: "success", result: USDC_ADDRESS },
+          { status: "success", result: [79228162514264337593543950336n, 0, 0, 0, 0, 0, true] },
+          { status: "success", result: [79228162514264337593543950336n, 0, 0, 0, 0, 0, true] },
+        ])
+        // Balance calls
+        .mockResolvedValueOnce([
+          { status: "success", result: 1000000n },
+          { status: "success", result: 500000000000000000000n },
+          { status: "success", result: 2000000n },
+          { status: "success", result: 1000000000000000000000n },
+        ]);
     });
 
     it("should successfully fetch market details", async () => {
@@ -186,27 +198,30 @@ describe("TrueMarketsActionProvider", () => {
 
       const response = await provider.getMarketDetails(mockWallet, args);
 
-      // Verify the contract was called with correct parameters
-      expect(mockWallet.readContract).toHaveBeenCalledWith({
-        address: MOCK_MARKET_ADDRESS,
-        abi: TruthMarketABI,
-        functionName: "marketQuestion",
-      });
+      // Verify the expected JSON structure
+      expect(response.marketAddress).toBe(MOCK_MARKET_ADDRESS);
+      expect(response.question).toBe(MOCK_MARKET_QUESTION);
+      expect(response.additionalInfo).toBe(MOCK_ADDITIONAL_INFO);
+      expect(response.source).toBe(MOCK_MARKET_SOURCE);
+      expect(response.status).toBe("Created");
 
-      // Verify response contains expected data
-      expect(response).toContain(`Market Details for ${MOCK_MARKET_ADDRESS}`);
-      expect(response).toContain(`Question: ${MOCK_MARKET_QUESTION}`);
-      expect(response).toContain(`Additional Info: ${MOCK_ADDITIONAL_INFO}`);
-      expect(response).toContain(`Source: ${MOCK_MARKET_SOURCE}`);
-      expect(response).toContain("Status: Created");
-      expect(response).toContain("YES Pool:");
-      expect(response).toContain("NO Pool:");
+      // Verify tokens
+      expect(response.tokens.yes.lpAddress).toBe(MOCK_YES_POOL_ADDRESS);
+      expect(response.tokens.yes.tokenAddress).toBe(MOCK_YES_TOKEN_ADDRESS);
+      expect(response.tokens.no.lpAddress).toBe(MOCK_NO_POOL_ADDRESS);
+      expect(response.tokens.no.tokenAddress).toBe(MOCK_NO_TOKEN_ADDRESS);
+
+      // Verify prices and tvl exist
+      expect(typeof response.prices.yes).toBe("number");
+      expect(typeof response.prices.no).toBe("number");
+      expect(typeof response.tvl).toBe("number");
     });
 
     it("should handle errors", async () => {
       const error = new Error("Failed to fetch market details");
       mockWallet.readContract.mockReset();
-      mockWallet.readContract.mockRejectedValueOnce(error);
+      mockPublicClient.multicall.mockReset();
+      mockPublicClient.multicall.mockRejectedValueOnce(error);
 
       const args = {
         marketAddress: MOCK_MARKET_ADDRESS,
@@ -214,9 +229,15 @@ describe("TrueMarketsActionProvider", () => {
 
       const response = await provider.getMarketDetails(mockWallet, args);
 
-      expect(response).toContain(
+      expect(response.error).toBe(
         "Error retrieving market details: Error: Failed to fetch market details",
       );
+      expect(response.marketAddress).toBe(MOCK_MARKET_ADDRESS);
+      expect(response.question).toBe("");
+      expect(response.tokens.yes.tokenAddress).toBe("");
+      expect(response.tokens.yes.lpAddress).toBe("");
+      expect(response.tokens.no.tokenAddress).toBe("");
+      expect(response.tokens.no.lpAddress).toBe("");
     });
   });
 

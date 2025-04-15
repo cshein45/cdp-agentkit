@@ -17,7 +17,6 @@ truemarkets/
 ## Actions
 
 - `get_active_markets`: Get active prediction markets from Truemarkets
-
   - Returns a list of markets with their ID, contract address, and market question
   - Supports pagination and sorting options
 
@@ -41,7 +40,6 @@ To add new Truemarkets actions:
 
 The Truemarkets provider currently supports:
 - Base Mainnet
-- Base Sepolia
 
 ## Notes
 

@@ -27,6 +27,45 @@ interface TruthMarket {
 }
 
 /**
+ * Interface for the active markets response
+ */
+interface ActiveMarketsResponse {
+  totalMarkets: number;
+  markets: TruthMarket[];
+  error?: string;
+}
+
+/**
+ * Interface for market details response
+ */
+interface MarketDetailsResponse {
+  marketAddress: string;
+  question: string;
+  additionalInfo: string;
+  source: string;
+  status: string;
+  resolutionTime: string;
+  prices: {
+    yes: number;
+    no: number;
+  };
+  tokens: {
+    yes: {
+      tokenAddress: string;
+      lpAddress: string;
+      poolSize: number;
+    };
+    no: {
+      tokenAddress: string;
+      lpAddress: string;
+      poolSize: number;
+    };
+  };
+  tvl: number;
+  error?: string;
+}
+
+/**
  * Configuration options for the TrueMarketsActionProvider.
  */
 export interface TrueMarketsActionProviderConfig {
@@ -60,7 +99,7 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
    *
    * @param walletProvider - The wallet provider to use for contract interactions.
    * @param args - The input arguments for the action, including pagination and sorting options.
-   * @returns A message containing the active markets information.
+   * @returns JSON object containing the active markets information.
    */
   @CreateAction({
     name: "get_active_markets",
@@ -75,7 +114,7 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
   async getActiveMarkets(
     walletProvider: EvmWalletProvider,
     args: z.infer<typeof GetActiveTruthMarketsSchema>,
-  ): Promise<string> {
+  ): Promise<ActiveMarketsResponse> {
     try {
       const limit = args.limit;
       const offset = args.offset;
@@ -89,7 +128,7 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
       });
 
       if (numMarkets === 0n) {
-        return "No active markets found.";
+        return { totalMarkets: 0, markets: [] };
       }
 
       const totalMarkets = Number(numMarkets);
@@ -132,7 +171,11 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
         .map(result => result.result as unknown as Hex);
 
       if (validAddresses.length === 0) {
-        return "Failed to retrieve market addresses.";
+        return {
+          totalMarkets,
+          markets: [],
+          error: "Failed to retrieve market addresses",
+        };
       }
 
       // Use multicall to fetch all market questions in a single call
@@ -158,16 +201,16 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
               : "Failed to retrieve question",
         }));
 
-      // Format the results
-      let result = `Found ${markets.length} active markets (out of ${totalMarkets} total):\n\n`;
-
-      markets.forEach(market => {
-        result += `Market #${market.id} (${market.address}): ${market.marketQuestion}\n`;
-      });
-
-      return result;
+      return {
+        totalMarkets,
+        markets,
+      };
     } catch (error) {
-      return `Error retrieving active markets: ${error}`;
+      return {
+        totalMarkets: 0,
+        markets: [],
+        error: `Error retrieving active markets: ${error}`,
+      };
     }
   }
 
@@ -176,7 +219,7 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
    *
    * @param walletProvider - The wallet provider to use for contract interactions.
    * @param args - The input arguments for the action, containing the market address.
-   * @returns A message containing detailed market information.
+   * @returns JSON object containing detailed market information.
    */
   @CreateAction({
     name: "get_market_details",
@@ -191,70 +234,155 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
   async getMarketDetails(
     walletProvider: EvmWalletProvider,
     args: z.infer<typeof GetMarketDetailsSchema>,
-  ): Promise<string> {
+  ): Promise<MarketDetailsResponse> {
     try {
       const marketAddress = args.marketAddress as Hex;
 
-      // Get basic market info
-      const [question, additionalInfo, source, statusNum, endOfTrading, pools] = await Promise.all([
-        walletProvider.readContract({
+      // Get basic market info using multicall
+      const basicInfoCalls = [
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "marketQuestion",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "additionalInfo",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "marketSource",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "getCurrentStatus",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "endOfTrading",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: marketAddress,
           abi: TruthMarketABI,
           functionName: "getPoolAddresses",
-        }),
-      ]);
+        },
+      ];
+
+      const basicInfoResults = await this.#publicClient.multicall({
+        contracts: basicInfoCalls,
+      });
+
+      // Extract results, handling potential errors
+      if (basicInfoResults.some(result => result.status === "failure")) {
+        return {
+          marketAddress,
+          question: "",
+          additionalInfo: "",
+          source: "",
+          status: "",
+          resolutionTime: "",
+          prices: { yes: 0, no: 0 },
+          tokens: {
+            yes: { tokenAddress: "", lpAddress: "", poolSize: 0 },
+            no: { tokenAddress: "", lpAddress: "", poolSize: 0 },
+          },
+          tvl: 0,
+          error: "Error retrieving basic market information",
+        };
+      }
+
+      const question = basicInfoResults[0].result as string;
+      const additionalInfo = basicInfoResults[1].result as string;
+      const source = basicInfoResults[2].result as string;
+      const statusNum = basicInfoResults[3].result as bigint;
+      const endOfTrading = basicInfoResults[4].result as bigint;
+      const pools = basicInfoResults[5].result as [Hex, Hex];
 
       // Get pool addresses
-      const [yesPool, noPool] = pools as [Hex, Hex];
+      const [yesPool, noPool] = pools;
 
-      // Get pool token information
-      const [yesToken0, yesToken1, noToken0, noToken1] = await Promise.all([
-        walletProvider.readContract({
+      // Get pool token information using multicall
+      const poolInfoCalls = [
+        {
           address: yesPool,
           abi: UniswapV3PoolABI,
           functionName: "token0",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: yesPool,
           abi: UniswapV3PoolABI,
           functionName: "token1",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: noPool,
           abi: UniswapV3PoolABI,
           functionName: "token0",
-        }),
-        walletProvider.readContract({
+        },
+        {
           address: noPool,
           abi: UniswapV3PoolABI,
           functionName: "token1",
-        }),
-      ]);
+        },
+        {
+          address: yesPool,
+          abi: UniswapV3PoolABI,
+          functionName: "slot0",
+        },
+        {
+          address: noPool,
+          abi: UniswapV3PoolABI,
+          functionName: "slot0",
+        },
+      ];
+
+      const poolInfoResults = await this.#publicClient.multicall({
+        contracts: poolInfoCalls,
+      });
+
+      if (poolInfoResults.some(result => result.status === "failure")) {
+        return {
+          marketAddress,
+          question,
+          additionalInfo,
+          source,
+          status: GetMarketStatus[Number(statusNum)] || "Unknown",
+          resolutionTime: new Date(Number(endOfTrading) * 1000).toISOString(),
+          prices: { yes: 0, no: 0 },
+          tokens: {
+            yes: { tokenAddress: "", lpAddress: yesPool, poolSize: 0 },
+            no: { tokenAddress: "", lpAddress: noPool, poolSize: 0 },
+          },
+          tvl: 0,
+          error: "Error retrieving pool information",
+        };
+      }
+
+      const yesToken0 = poolInfoResults[0].result as Hex;
+      const yesToken1 = poolInfoResults[1].result as Hex;
+      const noToken0 = poolInfoResults[2].result as Hex;
+      const noToken1 = poolInfoResults[3].result as Hex;
+      const yesSlot0 = poolInfoResults[4].result as [
+        bigint,
+        number,
+        number,
+        number,
+        number,
+        number,
+        boolean,
+      ];
+      const noSlot0 = poolInfoResults[5].result as [
+        bigint,
+        number,
+        number,
+        number,
+        number,
+        number,
+        boolean,
+      ];
 
       // Determine which token is the YES/NO token and which is USDC in each pool
       const yesToken = yesToken0 === USDC_ADDRESS ? yesToken1 : yesToken0;
@@ -262,48 +390,60 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
       const isYesToken0 = yesToken0 === yesToken;
       const isNoToken0 = noToken0 === noToken;
 
-      // Get pool balances
-      const [yesPoolUsdcBalance, yesPoolTokenBalance, noPoolUsdcBalance, noPoolTokenBalance] =
-        await Promise.all([
-          walletProvider.readContract({
-            address: USDC_ADDRESS,
-            abi: ERC20ABI,
-            functionName: "balanceOf",
-            args: [yesPool],
-          }),
-          walletProvider.readContract({
-            address: yesToken,
-            abi: ERC20ABI,
-            functionName: "balanceOf",
-            args: [yesPool],
-          }),
-          walletProvider.readContract({
-            address: USDC_ADDRESS,
-            abi: ERC20ABI,
-            functionName: "balanceOf",
-            args: [noPool],
-          }),
-          walletProvider.readContract({
-            address: noToken,
-            abi: ERC20ABI,
-            functionName: "balanceOf",
-            args: [noPool],
-          }),
-        ]);
+      // Get pool balances using multicall
+      const balanceCalls = [
+        {
+          address: USDC_ADDRESS as Hex,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [yesPool],
+        },
+        {
+          address: yesToken,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [yesPool],
+        },
+        {
+          address: USDC_ADDRESS as Hex,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [noPool],
+        },
+        {
+          address: noToken,
+          abi: ERC20ABI,
+          functionName: "balanceOf",
+          args: [noPool],
+        },
+      ];
 
-      // Get liquidity and price data
-      const [yesSlot0, noSlot0] = await Promise.all([
-        walletProvider.readContract({
-          address: yesPool,
-          abi: UniswapV3PoolABI,
-          functionName: "slot0",
-        }),
-        walletProvider.readContract({
-          address: noPool,
-          abi: UniswapV3PoolABI,
-          functionName: "slot0",
-        }),
-      ]);
+      const balanceResults = await this.#publicClient.multicall({
+        contracts: balanceCalls,
+      });
+
+      if (balanceResults.some(result => result.status === "failure")) {
+        return {
+          marketAddress,
+          question,
+          additionalInfo,
+          source,
+          status: GetMarketStatus[Number(statusNum)] || "Unknown",
+          resolutionTime: new Date(Number(endOfTrading) * 1000).toISOString(),
+          prices: { yes: 0, no: 0 },
+          tokens: {
+            yes: { tokenAddress: "", lpAddress: yesPool, poolSize: 0 },
+            no: { tokenAddress: "", lpAddress: noPool, poolSize: 0 },
+          },
+          tvl: 0,
+          error: "Error retrieving token balances",
+        };
+      }
+
+      const yesPoolUsdcBalance = balanceResults[0].result as bigint;
+      const yesPoolTokenBalance = balanceResults[1].result as bigint;
+      const noPoolUsdcBalance = balanceResults[2].result as bigint;
+      const noPoolTokenBalance = balanceResults[3].result as bigint;
 
       // Calculate prices from slot0 data
       const calculatePrice = (
@@ -332,33 +472,16 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
       const usdcDecimals_ = Number(USDC_DECIMALS);
       const yesNoTokenDecimals_ = Number(YESNO_DECIMALS);
 
-      const yesSlot0Data = yesSlot0 as [bigint, number, number, number, number, number, boolean];
-      const noSlot0Data = noSlot0 as [bigint, number, number, number, number, number, boolean];
-
-      const yesPrice = calculatePrice(
-        yesSlot0Data[0],
-        isYesToken0,
-        usdcDecimals_,
-        yesNoTokenDecimals_,
-      );
-      const noPrice = calculatePrice(
-        noSlot0Data[0],
-        isNoToken0,
-        usdcDecimals_,
-        yesNoTokenDecimals_,
-      );
+      const yesPrice = calculatePrice(yesSlot0[0], isYesToken0, usdcDecimals_, yesNoTokenDecimals_);
+      const noPrice = calculatePrice(noSlot0[0], isNoToken0, usdcDecimals_, yesNoTokenDecimals_);
 
       // Calculate TVL using token balances
-      const yesPoolUsdcValue = Number(
-        formatUnits((yesPoolUsdcBalance as bigint) || 0n, usdcDecimals_),
-      );
+      const yesPoolUsdcValue = Number(formatUnits(yesPoolUsdcBalance || 0n, usdcDecimals_));
       const yesPoolTokenValue =
-        Number(formatUnits((yesPoolTokenBalance as bigint) || 0n, yesNoTokenDecimals_)) * yesPrice;
-      const noPoolUsdcValue = Number(
-        formatUnits((noPoolUsdcBalance as bigint) || 0n, usdcDecimals_),
-      );
+        Number(formatUnits(yesPoolTokenBalance || 0n, yesNoTokenDecimals_)) * yesPrice;
+      const noPoolUsdcValue = Number(formatUnits(noPoolUsdcBalance || 0n, usdcDecimals_));
       const noPoolTokenValue =
-        Number(formatUnits((noPoolTokenBalance as bigint) || 0n, yesNoTokenDecimals_)) * noPrice;
+        Number(formatUnits(noPoolTokenBalance || 0n, yesNoTokenDecimals_)) * noPrice;
 
       const yesTVL = yesPoolUsdcValue + yesPoolTokenValue;
       const noTVL = noPoolUsdcValue + noPoolTokenValue;
@@ -370,25 +493,47 @@ export class TrueMarketsActionProvider extends ActionProvider<EvmWalletProvider>
       // Format the end of trading time
       const endOfTradingTime = new Date(Number(endOfTrading) * 1000).toISOString();
 
-      // Build the response
-      let result = `Market Details for ${marketAddress}:\n\n`;
-      result += `Question: ${question}\n`;
-      result += `Additional Info: ${additionalInfo}\n`;
-      result += `Source: ${source}\n`;
-      result += `Status: ${status}\n`;
-      result += `Earliest possible resolution: ${endOfTradingTime}\n\n`;
-
-      result += `YES: $${yesPrice.toFixed(2)}\n`;
-      result += `NO: $${noPrice.toFixed(2)}\n\n`;
-      result += `TVL: $${totalTVL.toFixed(2)}`;
-
-      result += `Pool Addresses:\n`;
-      result += `- YES Pool: ${yesPool} (Pool Size: $${yesTVL.toFixed(2)})\n`;
-      result += `- NO Pool: ${noPool} (Pool Size: $${noTVL.toFixed(2)})\n\n`;
-
-      return result;
+      return {
+        marketAddress,
+        question,
+        additionalInfo,
+        source,
+        status,
+        resolutionTime: endOfTradingTime,
+        prices: {
+          yes: parseFloat(yesPrice.toFixed(2)),
+          no: parseFloat(noPrice.toFixed(2)),
+        },
+        tokens: {
+          yes: {
+            tokenAddress: yesToken,
+            lpAddress: yesPool,
+            poolSize: parseFloat(yesTVL.toFixed(2)),
+          },
+          no: {
+            tokenAddress: noToken,
+            lpAddress: noPool,
+            poolSize: parseFloat(noTVL.toFixed(2)),
+          },
+        },
+        tvl: parseFloat(totalTVL.toFixed(2)),
+      };
     } catch (error) {
-      return `Error retrieving market details: ${error}`;
+      return {
+        marketAddress: args.marketAddress,
+        question: "",
+        additionalInfo: "",
+        source: "",
+        status: "",
+        resolutionTime: "",
+        prices: { yes: 0, no: 0 },
+        tokens: {
+          yes: { tokenAddress: "", lpAddress: "", poolSize: 0 },
+          no: { tokenAddress: "", lpAddress: "", poolSize: 0 },
+        },
+        tvl: 0,
+        error: `Error retrieving market details: ${error}`,
+      };
     }
   }
 
