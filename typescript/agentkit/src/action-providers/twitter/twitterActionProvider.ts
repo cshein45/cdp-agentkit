@@ -144,6 +144,8 @@ A failure response will return a message with the Twitter API request error:
     name: "post_tweet",
     description: `
 This tool will post a tweet on Twitter. The tool takes the text of the tweet as input. Tweets can be maximum 280 characters.
+Optionally, up to 4 media items (images, videos) can be attached to the tweet by providing their media IDs in the mediaIds array.
+Media IDs are obtained by first uploading the media using the upload_media action.
 
 A successful response will return a message with the API response as a JSON payload:
     {"data": {"text": "hello, world!", "id": "0123456789012345678", "edit_history_tweet_ids": ["0123456789012345678"]}}
@@ -180,7 +182,10 @@ A failure response will return a message with the Twitter API request error:
   @CreateAction({
     name: "post_tweet_reply",
     description: `
-This tool will post a tweet on Twitter. The tool takes the text of the tweet as input. Tweets can be maximum 280 characters.
+This tool will post a reply to a tweet on Twitter. The tool takes the text of the reply and the ID of the tweet to reply to as input.
+Replies can be maximum 280 characters.
+Optionally, up to 4 media items (images, videos) can be attached to the reply by providing their media IDs in the mediaIds array.
+Media IDs can be obtained by first uploading the media using the upload_media action.
 
 A successful response will return a message with the API response as a JSON payload:
     {"data": {"text": "hello, world!", "id": "0123456789012345678", "edit_history_tweet_ids": ["0123456789012345678"]}}
