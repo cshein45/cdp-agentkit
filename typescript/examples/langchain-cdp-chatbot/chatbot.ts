@@ -10,7 +10,6 @@ import {
   pythActionProvider,
   openseaActionProvider,
   alloraActionProvider,
-  // zoraActionProvider,
 } from "@coinbase/agentkit";
 import { getLangChainTools } from "@coinbase/agentkit-langchain";
 import { HumanMessage } from "@langchain/core/messages";
@@ -123,10 +122,6 @@ async function initializeAgent() {
             ]
           : []),
         alloraActionProvider(),
-        // zoraActionProvider({
-        //   privateKey: process.env.ZORA_PRIVATE_KEY || "",
-        //   RPC_URL: process.env.ZORA_RPC_URL,
-        // }),
       ],
     });
 

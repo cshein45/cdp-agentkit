@@ -1,64 +1,54 @@
 # Zora Action Provider
 
-This action provider enables AI agents to interact with the [Zora](https://zora.co/) protocol to create cryptocurrencies on the Base blockchain.
+This directory contains the **ZoraActionProvider** implementation, which provides actions to interact with the **Zora protocol** for creating cryptocurrencies on the Base blockchain.
 
-## Installation
+## Directory Structure
 
-To use the Zora action provider, you need to install the required dependency:
-
-```bash
-npm install @zoralabs/coins-sdk
-# or 
-pnpm add @zoralabs/coins-sdk
+```
+zora/
+├── zoraActionProvider.ts         # Main provider with Zora functionality
+├── zoraActionProvider.test.ts    # Test file for Zora provider
+├── schemas.ts                    # Coin creation schemas
+├── utils.ts                      # Utility functions for Zora integration
+├── index.ts                      # Main exports
+└── README.md                     # This file
 ```
 
 ## Actions
 
-### createCoin
+- `coinIt`: Creates a new coin on the Zora Protocol.
 
-Creates a new coin on the Zora Protocol.
+  **Parameters**:
 
-**Parameters**:
+  - `name`: The name of the coin to create
+  - `symbol`: The symbol of the coin to create
+  - `description`: The description of the coin
+  - `image`: Local image file path or URI (ipfs:// or https://)
+  - `category` (optional): The category of the coin, defaults to 'social'
+  - `payoutRecipient` (optional): The address that will receive creator earnings, defaults to wallet address
+  - `platformReferrer` (optional): Platform referrer address that earns referral fees
+  - `initialPurchase` (optional): Initial purchase amount in ETH (e.g., "1.5" for 1.5 ETH)
 
-- `name`: The name of the coin to create
-- `symbol`: The symbol of the coin to create
-- `uri`: The metadata URI for the coin (IPFS URI recommended)
-- `payoutRecipient`: The address that will receive creator earnings
-- `platformReferrer` (optional): Platform referrer address that earns referral fees
-- `initialPurchaseWei` (optional): Initial purchase amount in wei
+## Adding New Actions
 
-**Example**:
+To add new Zora actions:
 
-```typescript
-import { ZoraActionProvider } from "@coinbase/agentkit";
-import { CdpWalletProvider } from "@coinbase/agentkit";
+1. Define your action schema in `schemas.ts`
+2. Implement the action in `zoraActionProvider.ts`
+3. Add tests in `zoraActionProvider.test.ts`
 
-// Initialize wallet provider
-const walletProvider = new CdpWalletProvider({
-  clientId: "your-cdp-client-id",
-  clientSecret: "your-cdp-client-secret",
-  walletId: "your-wallet-id"
-});
+## Configuration
 
-// Initialize Zora action provider
-const zoraProvider = new ZoraActionProvider({
-  privateKey: "0x123...", // Private key for the wallet client
-  RPC_URL: "https://mainnet.base.org" // Optional RPC URL
-});
-
-// Create a coin
-const result = await zoraProvider.createCoin(walletProvider, {
-  name: "My Awesome Coin",
-  symbol: "MAC",
-  uri: "ipfs://bafybeigoxzqzbnxsn35vq7lls3ljxdcwjafxvbvkivprsodzrptpiguysy",
-  payoutRecipient: "0xYourAddress",
-  platformReferrer: "0xOptionalPlatformReferrerAddress", // Optional
-  initialPurchaseWei: 0n // Optional: Initial amount to purchase in Wei
-});
-
-console.log(result);
-```
+The provider requires a Pinata JWT for IPFS uploads. This can be provided via:
+- Environment variable: `PINATA_JWT`
+- Provider configuration: `pinataJwt` parameter
 
 ## Network Support
 
-This action provider supports all EVM-compatible networks, but is designed primarily for use with Base. 
+The Zora provider supports the following networks:
+- Base Mainnet
+- Base Sepolia
+
+## Notes
+
+For more information on the **Zora protocol**, visit [Zora Documentation](https://docs.zora.co/coins). 
